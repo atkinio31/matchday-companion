@@ -58,6 +58,31 @@ export const mockAssistant: Assistant = {
   },
 };
 
+const GEMINI_MODEL = "gemini-2.5-flash";
+
+/**
+ * Step 1 of 4: the raw Gemini call — no grounding, no error handling yet.
+ * SAIL parallel: this is the integration object; the connected system is the
+ * endpoint + key; the wrapper rule (grounding, fallback) comes in later steps.
+ */
+export async function askGeminiRaw(question: string, key: string): Promise<string> {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": key,
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: question }] }],
+      }),
+    },
+  );
+  const data = await res.json();
+  return data.candidates[0].content.parts[0].text;
+}
+
 /**
  * YOUR TASK (ROADMAP item 1): implement the Gemini-backed assistant here.
  * Shape of the work:
