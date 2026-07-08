@@ -60,12 +60,32 @@ export const mockAssistant: Assistant = {
 
 const GEMINI_MODEL = "gemini-2.5-flash";
 
+const GEMINI_INSTRUCTION =
+  "You are a matchday travel assistant for fans visiting the American Express Stadium. " +
+  "Answer only from the knowledge base below. If the answer is not in it, say so rather " +
+  "than guessing. Keep answers short and practical.";
+
+// The model can't see the app's state — everything it should use (facts, the
+// selected fixture) has to be serialised into this one string.
+function buildPrompt(question: string, ctx: AssistantContext): string {
+  const fixtureText = ctx.fixture
+    ? `Selected fixture: ${ctx.fixture.opponent} (${ctx.fixture.home ? "home" : "away"}, ${ctx.fixture.competition}), kickoff ${new Date(ctx.fixture.kickoff).toLocaleString("en-GB", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}.`
+    : "No fixture selected.";
+
+  return [
+    GEMINI_INSTRUCTION,
+    `Knowledge base:\n${knowledgeBaseText()}`,
+    fixtureText,
+    `Fan's question: ${question}`,
+  ].join("\n\n");
+}
+
 /**
- * Step 1 of 4: the raw Gemini call — no grounding, no error handling yet.
- * SAIL parallel: this is the integration object; the connected system is the
- * endpoint + key; the wrapper rule (grounding, fallback) comes in later steps.
+ * Steps 1–2 of 4: grounded Gemini call. Error handling / mock fallback still
+ * to come — a failed request currently rejects.
  */
-export async function askGeminiRaw(question: string, key: string): Promise<string> {
+export async function askGemini(question: string, ctx: AssistantContext, key: string): Promise<string> {
+  const prompt = buildPrompt(question, ctx);
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
     {
@@ -75,7 +95,7 @@ export async function askGeminiRaw(question: string, key: string): Promise<strin
         "x-goog-api-key": key,
       },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: question }] }],
+        contents: [{ parts: [{ text: prompt }] }],
       }),
     },
   );
@@ -84,18 +104,16 @@ export async function askGeminiRaw(question: string, key: string): Promise<strin
 }
 
 /**
- * YOUR TASK (ROADMAP item 1): implement the Gemini-backed assistant here.
- * Shape of the work:
- *   - read the key from import.meta.env.VITE_GEMINI_API_KEY
- *   - POST to the Gemini generateContent endpoint
- *   - system-style prompt: "Answer only from this knowledge base: ..." + knowledgeBaseText()
- *   - include the selected fixture from ctx for date/kickoff-aware answers
- *   - on any error, fall back to mockAssistant.ask(question, ctx)
+ * ROADMAP item 1, remaining work (steps 3–4): a proper Gemini Assistant that
+ * falls back to mockAssistant.ask(question, ctx) on any error.
  */
 export function buildAssistant(): Assistant {
   const key = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
   if (!key) return mockAssistant;
-  // TODO(jonathan): return a Gemini-backed Assistant here.
-  void knowledgeBaseText; // referenced so the helper is ready for your implementation
-  return mockAssistant;
+  // TEMPORARY wiring so step 2 is testable in the app. No fallback yet — if
+  // the request fails, the chat shows an error. Step 3 replaces this.
+  return {
+    name: "Matchday Assistant (Gemini — no fallback yet)",
+    ask: (question, ctx) => askGemini(question, ctx, key),
+  };
 }
