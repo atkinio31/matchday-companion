@@ -81,8 +81,9 @@ function buildPrompt(question: string, ctx: AssistantContext): string {
 }
 
 /**
- * Steps 1–2 of 4: grounded Gemini call. Error handling / mock fallback still
- * to come — a failed request currently rejects.
+ * Grounded Gemini call. Throws on ANY failure — network error, non-OK HTTP
+ * status, or a 200 with no usable text (e.g. a SAFETY-blocked candidate) —
+ * so the caller has a single error channel to catch and fall back on.
  */
 export async function askGemini(question: string, ctx: AssistantContext, key: string): Promise<string> {
   const prompt = buildPrompt(question, ctx);
@@ -99,21 +100,29 @@ export async function askGemini(question: string, ctx: AssistantContext, key: st
       }),
     },
   );
+  if (!res.ok) {
+    throw new Error(`Gemini responded ${res.status}`);
+  }
   const data = await res.json();
-  return data.candidates[0].content.parts[0].text;
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (typeof text !== "string" || text.length === 0) {
+    throw new Error("Gemini returned no usable text");
+  }
+  return text;
 }
 
-/**
- * ROADMAP item 1, remaining work (steps 3–4): a proper Gemini Assistant that
- * falls back to mockAssistant.ask(question, ctx) on any error.
- */
 export function buildAssistant(): Assistant {
   const key = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
   if (!key) return mockAssistant;
-  // TEMPORARY wiring so step 2 is testable in the app. No fallback yet — if
-  // the request fails, the chat shows an error. Step 3 replaces this.
   return {
-    name: "Matchday Assistant (Gemini — no fallback yet)",
-    ask: (question, ctx) => askGemini(question, ctx, key),
+    name: "Matchday Assistant (Gemini)",
+    async ask(question, ctx) {
+      try {
+        return await askGemini(question, ctx, key);
+      } catch (err) {
+        console.warn("Gemini unavailable, using offline answer:", err);
+        return mockAssistant.ask(question, ctx);
+      }
+    },
   };
 }
